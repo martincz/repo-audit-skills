@@ -30,8 +30,10 @@
 
 ### 1. 通过 Skills CLI 安装（推荐）
 ```bash
-# 全局安装到当前机器支持的 Coding Agents
-npx skills add <repo-url-or-owner/repo-audit-skills> --skill repo-audit -g
+# 全局安装到当前机器支持的 Coding Agents（支持完整 GitHub URL 或简写）
+npx skills add https://github.com/martincz/repo-audit-skills --skill repo-audit -g
+# 等价简写（加 -y 可跳过交互确认）
+npx skills add martincz/repo-audit-skills --skill repo-audit -g -y
 ```
 
 ### 2. 手动软链或拷贝挂载
