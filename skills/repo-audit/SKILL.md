@@ -20,24 +20,29 @@ metadata:
 
 ## 1. 意图路由与按需加载（Progressive Disclosure）
 
-根据用户诉求匹配下表，**仅读取当次任务命中的 1～2 份参考文件**，不预加载无关专项：
+### 无参数或帮助发现（Menu Mode）
+当用户仅输入 `/repo-audit`、`$repo-audit`、`/repo-audit help` / `list` 或询问“有哪些功能/专项”时，**不自动执行任何审计或修改**。请先快速扫描目标仓库顶层目录特征（如是否含前端代码、数据库迁移、`tests/`、`AGENTS.md` 或 `SKILL.md`），然后直接输出按 `Mode R`（只读 8 项）与 `Mode W-Doc`（改文档 3 项）分组的精简能力菜单（含编号、短子命令、权限门禁与一句话职责），顺手标出最适合当前仓库的 2～3 项推荐，提示用户回复编号、短子命令或自然语言即可启动。
 
-| 用户意图 / 审计领域 | 权限门禁 | 按需读取的专项规程（相对 `<skill-dir>`） |
-| :--- | :--- | :--- |
-| 全局项目体检、未知风险初筛、排期摸底 | `Mode R`（严格只读） | [references/health-check.md](references/health-check.md) |
-| 安全漏洞、鉴权/多租户越权、密钥脱敏、注入/SSRF、供应链与 AI 工具边界 | `Mode R`（严格只读） | [references/security-boundary.md](references/security-boundary.md) |
-| 编码正确性、并发/异常/精度边界、非必要复杂度与过度设计减法 | `Mode R`（严格只读） | [references/code-quality.md](references/code-quality.md) |
-| 代码目录归属、巨石文件拆分、微文件合并、单向 DAG 依赖重组蓝图 | `Mode R`（严格只读） | [references/module-structure.md](references/module-structure.md) |
-| Web 页面 UI/UX、视觉层级倒挂、样式耦合、响应式与换肤成本审计 | `Mode R`（严格只读） | [references/frontend-ui-audit.md](references/frontend-ui-audit.md) |
-| 数据库 Schema/迁移、高频 SQL/索引/事务幂等、全量数据生命周期与保留契约 | `Mode R`（严格只读） | [references/database-audit.md](references/database-audit.md) |
-| 应用层热路径性能、外部 API/I/O 批量化、事件循环阻塞、内存与 LLM 配额效率 | `Mode R`（严格只读） | [references/app-performance.md](references/app-performance.md) |
-| 测试套件去重瘦身、高危路径测试缺口、秒级增量 `pre-commit` 与门禁分层蓝图 | `Mode R`（严格只读） | [references/test-and-gates.md](references/test-and-gates.md) |
-| 建立或重构前端产品与设计规范文档（`PRODUCT.md` / `DESIGN.json` / `DESIGN.md`） | `Mode W-Doc`（仅改规范文档） | [references/frontend-design-docs.md](references/frontend-design-docs.md) |
-| 重构普通业务仓库的 `AGENTS.md`、`CLAUDE.md`、项目级 Skills 与开发指导文档 | `Mode W-Doc`（仅改规范文档） | [references/agent-docs-business.md](references/agent-docs-business.md) |
-| 审计并升级以 Skills、Prompts、Subagents 为交付产物的框架/工具仓库 | `Mode W-Doc`（仅改规范与包配置） | [references/agent-skills-framework.md](references/agent-skills-framework.md) |
+### 短子命令与自然语言路由表
+根据用户子命令或自然语言诉求匹配下表，**仅读取当次任务命中的 1～2 份参考文件**，不预加载无关专项：
+
+| 子命令 | 用户意图 / 审计领域 | 权限门禁 | 按需读取的专项规程（相对 `<skill-dir>`） |
+| :--- | :--- | :--- | :--- |
+| `health` | 全局项目体检、未知风险初筛、排期摸底 | `Mode R`（严格只读） | [references/health-check.md](references/health-check.md) |
+| `security` | 安全漏洞、鉴权/多租户越权、密钥脱敏、注入/SSRF、供应链与 AI 工具边界 | `Mode R`（严格只读） | [references/security-boundary.md](references/security-boundary.md) |
+| `code` | 编码正确性、并发/异常/精度边界、非必要复杂度与过度设计减法 | `Mode R`（严格只读） | [references/code-quality.md](references/code-quality.md) |
+| `structure` | 代码目录归属、巨石文件拆分、微文件合并、单向 DAG 依赖重组蓝图 | `Mode R`（严格只读） | [references/module-structure.md](references/module-structure.md) |
+| `ui` | Web 页面 UI/UX、视觉层级倒挂、样式耦合、响应式与换肤成本审计 | `Mode R`（严格只读） | [references/frontend-ui-audit.md](references/frontend-ui-audit.md) |
+| `db` | 数据库 Schema/迁移、高频 SQL/索引/事务幂等、全量数据生命周期与保留契约 | `Mode R`（严格只读） | [references/database-audit.md](references/database-audit.md) |
+| `perf` | 应用层热路径性能、外部 API/I/O 批量化、事件循环阻塞、内存与 LLM 配额效率 | `Mode R`（严格只读） | [references/app-performance.md](references/app-performance.md) |
+| `test` | 测试套件去重瘦身、高危路径测试缺口、秒级增量 `pre-commit` 与门禁分层蓝图 | `Mode R`（严格只读） | [references/test-and-gates.md](references/test-and-gates.md) |
+| `design-docs` | 建立或重构前端产品与设计规范文档（`PRODUCT.md` / `DESIGN.json` / `DESIGN.md`） | `Mode W-Doc`（仅改规范文档） | [references/frontend-design-docs.md](references/frontend-design-docs.md) |
+| `agents` | 重构普通业务仓库的 `AGENTS.md`、`CLAUDE.md`、项目级 Skills 与开发指导文档 | `Mode W-Doc`（仅改规范文档） | [references/agent-docs-business.md](references/agent-docs-business.md) |
+| `skill-repo` | 审计并升级以 Skills、Prompts、Subagents 为交付产物的框架/工具仓库 | `Mode W-Doc`（仅改规范与包配置） | [references/agent-skills-framework.md](references/agent-skills-framework.md) |
 
 **路由补充规则**：
-- 若用户请求笼统（如“全面审一下这个项目”），先执行 `references/health-check.md`；仅在用户明确点名多个专项（如“做一次安全 + 数据库审计”）时并行读取对应专项。
+- 支持短子命令直达（如 `/repo-audit db`）、空格组合多专项（如 `/repo-audit security db`）以及自然语言自动匹配。
+- 仅在用户明确表达全局体检诉求（如 `/repo-audit health` 或“全面审一下这个项目”）时运行 `references/health-check.md`；无参数调用一律先展示菜单等待选择。
 - 用户当次明确指令优先于默认流程（例如在 `Mode W-Doc` 专项中用户声明“只读评估先别改文件”，则降级为 `Mode R`），但任何指令不得突破下方安全红线。
 
 ---

@@ -1,7 +1,7 @@
 interface:
   display_name: "Repo Audit & Doc Governance"
   short_description: "Read-only repo audits & Agent/Design doc governance"
-  default_prompt: "Use $repo-audit to run a comprehensive read-only health check on this repository."
+  default_prompt: "Use $repo-audit to show available audit/governance subcommands or run a targeted check."
 
 policy:
   allow_implicit_invocation: true
