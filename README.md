@@ -19,8 +19,8 @@
 | `perf` | **应用层性能** | [app-performance.md](skills/repo-audit/references/app-performance.md) | `Mode R` 只读 | 外部 I/O 批量化、事件循环同步阻塞、单链重复拉取、热路径算法/流式处理，以及重试风暴与 LLM Prompt Cache 效率 |
 | `test` | **测试与门禁** | [test-and-gates.md](skills/repo-audit/references/test-and-gates.md) | `Mode R` 只读 | 实测耗时采样、清理 4 类 AI 膨胀测试与真 `sleep`、识别高危路径测试缺口、设计秒级增量 `pre-commit` 分层蓝图 |
 | `design-docs` | **设计规范立标** | [frontend-design-docs.md](skills/repo-audit/references/frontend-design-docs.md) | `Mode W-Doc` 仅改规范文档 | 采优去杂建立或重构 `PRODUCT.md`、`DESIGN.json`、`DESIGN.md` 单一事实源，严禁改动业务源码与样式代码 |
-| `agents` | **业务仓 Agent 治理** | [agent-docs-business.md](skills/repo-audit/references/agent-docs-business.md) | `Mode W-Doc` 仅改规范文档 | 对照源码直接重构普通业务项目的 `AGENTS.md`、`CLAUDE.md`、项目级 Skills 与开发文档，软化过度停顿措辞并保留核心红线 |
-| `skill-repo` | **Skills 框架仓治理** | [agent-skills-framework.md](skills/repo-audit/references/agent-skills-framework.md) | `Mode W-Doc` 仅改规范与配置 | 面向 Skills / Subagents 交付仓库：`agentskills.io` 合规、三层渐进式披露拆分、跨端扩展字段隔离与提示词现代化 |
+| `agents` | **业务仓 Agent 治理** | [agent-docs-business.md](skills/repo-audit/references/agent-docs-business.md) | `Mode W-Doc` 仅改规范文档 | 对照源码直接重构普通业务项目的 `AGENTS.md`、`CLAUDE.md`、项目级 Skills 与开发文档，对齐闭环验收、缓存前缀稳定与自主边界规范并保留核心红线 |
+| `skill-repo` | **Skills 框架仓治理** | [agent-skills-framework.md](skills/repo-audit/references/agent-skills-framework.md) | `Mode W-Doc` 仅改规范与配置 | 面向 Skills / Subagents 交付仓库：`agentskills.io` 合规、三层渐进式披露拆分、跨端配置隔离、评估驱动维护与提示词现代化 |
 
 > **安全承诺**：所有 `Mode R` 专项承诺零文件修改、零数据库写操作；所有 `Mode W-Doc` 专项在修改前必检 `git status`，仅修改目标规范/配置文档，收尾自动运行确定性死链与合规校验，并停留在本地工作区供人工审阅 `diff`（绝不自动 `git commit` 或 `git push`）。
 
