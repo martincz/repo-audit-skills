@@ -38,7 +38,6 @@ Checks:
 from __future__ import annotations
 
 import argparse
-import copy
 import json
 import os
 import pathlib
@@ -571,7 +570,7 @@ def _parse_flow_value(token: str, line_no: int, anchors: dict[str, Any]) -> Any:
             raise YamlParseError(f"Line {line_no}: Invalid YAML alias {token!r} in flow collection")
         if alias_name not in anchors:
             raise YamlParseError(f"Line {line_no}: Undefined YAML alias '*{alias_name}'")
-        return copy.deepcopy(anchors[alias_name])
+        return anchors[alias_name]
     if token.startswith("&"):
         anchor_match = YAML_ANCHOR_PREFIX_RE.match(token)
         if not anchor_match:
@@ -583,7 +582,7 @@ def _parse_flow_value(token: str, line_no: int, anchors: dict[str, Any]) -> Any:
                 f"Line {line_no}: Anchor '&{anchor_name}' cannot directly precede another anchor or alias"
             )
         val = _parse_flow_value(after_anchor, line_no, anchors) if after_anchor else None
-        anchors[anchor_name] = copy.deepcopy(val)
+        anchors[anchor_name] = val
         return val
     if token.startswith('"'):
         decoded, close_idx, _ = _decode_double_quoted_segment(token[1:], line_no)
@@ -797,7 +796,7 @@ def _parse_value(
             raise YamlParseError(f"Line {base_line_no + idx}: Invalid YAML alias {alias_part!r}")
         if alias_name not in anchors:
             raise YamlParseError(f"Line {base_line_no + idx}: Undefined YAML alias '*{alias_name}'")
-        return copy.deepcopy(anchors[alias_name]), idx + 1
+        return anchors[alias_name], idx + 1
     if rest.startswith("&"):
         anchor_match = YAML_ANCHOR_PREFIX_RE.match(rest)
         if not anchor_match:
@@ -809,7 +808,7 @@ def _parse_value(
                 f"Line {base_line_no + idx}: Anchor '&{anchor_name}' cannot directly precede another anchor or alias"
             )
         val, next_idx = _parse_value(lines, idx, after_anchor, parent_indent, base_line_no, anchors)
-        anchors[anchor_name] = copy.deepcopy(val)
+        anchors[anchor_name] = val
         return val, next_idx
 
     first_part, had_comment = _strip_plain_inline_comment(rest)
@@ -1102,9 +1101,14 @@ def check_openai_sidecar(
         elif "allow_implicit_invocation" in policy:
             allow_implicit = policy["allow_implicit_invocation"]
             if not isinstance(allow_implicit, bool):
+                detail = (
+                    f"{_yaml_type_name(allow_implicit)} ({allow_implicit!r})"
+                    if not isinstance(allow_implicit, (list, dict))
+                    else _yaml_type_name(allow_implicit)
+                )
                 errors.append(
                     f"{sc_rel}: policy.allow_implicit_invocation must be an unquoted YAML boolean "
-                    f"(true/false), got {_yaml_type_name(allow_implicit)} ({allow_implicit!r})"
+                    f"(true/false), got {detail}"
                 )
 
     return errors, warnings
