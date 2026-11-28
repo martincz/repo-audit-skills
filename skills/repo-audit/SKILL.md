@@ -4,11 +4,11 @@ description: >-
   Full-spectrum repository audit, refactoring blueprint, and Agent/Design documentation
   governance suite covering health checks, security boundaries, code quality & complexity,
   module structure, frontend UI/UX & design tokens, database SQL & data lifecycle, application
-  performance, test suites & pre-commit gates, and AGENTS.md/Skills governance. Use when
-  the user asks to audit, review, inspect, diagnose, check repo health, output module/test
-  refactoring blueprints, or standardize PRODUCT.md/DESIGN.md/DESIGN.json/AGENTS.md/SKILL.md;
-  do not use for routine feature development
-  (当用户要求进行项目体检、编码/安全/前端/SQL/数据生命周期/性能/测试/目录结构只读审计，或重构
+  performance, artifact-producing batch/offline pipelines, test suites & pre-commit gates, and
+  AGENTS.md/Skills governance. Use when the user asks to audit, review, inspect, diagnose, check
+  repo health, output module/pipeline/test refactoring blueprints, or standardize
+  PRODUCT.md/DESIGN.md/DESIGN.json/AGENTS.md/SKILL.md; do not use for routine feature
+  development (当用户要求进行项目体检、编码/安全/前端/SQL/数据生命周期/性能/批处理与数据产物管线/测试/目录结构只读审计，或重构
   AGENTS.md、Skills、设计规范与项目文档时使用；日常普通业务功能开发不触发).
 license: MIT
 metadata:
@@ -22,7 +22,7 @@ metadata:
 ## 1. 意图路由与按需加载（Progressive Disclosure）
 
 ### 无参数或帮助发现（Menu Mode）
-当用户仅输入 `/repo-audit`、`$repo-audit`、`/repo-audit help` / `list` 或询问“有哪些功能/专项”时，**不自动执行任何审计或修改**。先快速扫描目标仓库顶层目录特征（如是否含前端代码、数据库迁移、`tests/`、`AGENTS.md` 或 `SKILL.md`），然后输出按 `Mode R`（只读 8 项）与 `Mode W-Doc`（改文档 3 项）分组的能力菜单（含编号、短子命令、权限门禁与核心职责），并标出最适合当前仓库的 2～3 项推荐，提示用户回复编号、短子命令或自然语言即可启动。
+当用户仅输入 `/repo-audit`、`$repo-audit`、`/repo-audit help` / `list` 或询问“有哪些功能/专项”时，**不自动执行任何审计或修改**。先快速扫描目标仓库顶层目录特征（如是否含前端代码、数据库迁移、批处理脚本/数据产物目录、`tests/`、`AGENTS.md` 或 `SKILL.md`），然后输出按 `Mode R`（只读 9 项）与 `Mode W-Doc`（改文档 3 项）分组的能力菜单（含编号、短子命令、权限门禁与核心职责），并标出最适合当前仓库的 2～3 项推荐，提示用户回复编号、短子命令或自然语言即可启动。
 
 ### 短子命令与自然语言路由表
 根据用户子命令或自然语言诉求匹配下表，**仅读取当次任务命中的参考文件**（单一诉求通常命中 1～2 份，显式多专项组合时加载全部命中专项），不预加载无关专项，并严格保留各自所属的权限门禁：
@@ -36,6 +36,7 @@ metadata:
 | `ui` | Web 页面 UI/UX、视觉层级倒挂、样式耦合、响应式与换肤成本审计 | `Mode R`（严格只读） | [references/frontend-ui-audit.md](references/frontend-ui-audit.md) |
 | `db` | 数据库 Schema/迁移、高频 SQL/索引/事务幂等、全量数据生命周期与保留契约 | `Mode R`（严格只读） | [references/database-audit.md](references/database-audit.md) |
 | `perf` | 应用层热路径性能、外部 API/I/O 批量化、事件循环阻塞、内存与 LLM 配额效率 | `Mode R`（严格只读） | [references/app-performance.md](references/app-performance.md) |
+| `pipeline` | 产物型批处理与离线作业、小文件碎片、重复校验/拷贝、计算-I/O 解耦、快路径退化与运行脚本闭包 | `Mode R`（严格只读） | [references/pipeline-efficiency.md](references/pipeline-efficiency.md) |
 | `test` | 测试套件去重瘦身、高危路径测试缺口、秒级增量 `pre-commit` 与门禁分层蓝图 | `Mode R`（严格只读） | [references/test-and-gates.md](references/test-and-gates.md) |
 | `design-docs` | 建立或重构前端产品与设计规范文档（`PRODUCT.md` / `DESIGN.json` / `DESIGN.md`） | `Mode W-Doc`（仅改规范文档） | [references/frontend-design-docs.md](references/frontend-design-docs.md) |
 | `agents` | 重构普通业务仓库的 `AGENTS.md`、`CLAUDE.md`、项目级 Skills 与开发指导文档 | `Mode W-Doc`（仅改规范文档） | [references/agent-docs-business.md](references/agent-docs-business.md) |
@@ -53,7 +54,7 @@ metadata:
 <permission_gate>
 默认安全落点为 **Mode R**。仅当用户当次请求明确要求创建、重构或升级治理/设计规范文档且命中上表最后三项时，才进入 **Mode W-Doc**。
 
-### Mode R：严格只读模式（8 份审计与蓝图专项）
+### Mode R：严格只读模式（9 份审计与蓝图专项）
 - **零仓库修改**：严禁创建、编辑、移动或删除任何源码、配置、迁移脚本、测试、钩子或文档（保持工作区干净以便后续分批落地与基准对比）。
 - **零外部副作用**：严禁对任何数据库执行 DDL/DML 写操作、向真实外部 API 发送写请求，或读取并输出真实用户密钥、会话与隐私明文（防止审计污染外部状态或造成凭证泄漏）。
 - **合成基准边界**：如需验证算法复杂度或局部逻辑，仅在沙箱内存中运行纯合成数据的无状态只读命令。
@@ -118,4 +119,5 @@ metadata:
    - **P1（近期收敛）**：高收益的核心性能瓶颈、关键架构耦合、高频慢查询或高风险测试真空
    - **Quick Win（顺手修复）**：改动极小、几乎零语义风险且立竿见影的局部加固或瘦身
    - **P2（长期演进）**：跨模块结构演进、全局主题/归档体系升级或低频长尾优化
+6. **多专项联合报告协同约定**（仅在组合专项确有共同调用链/工作负载，或显式包含 `pipeline` 时生效）：各命中专项复用同一工作负载基线（入口、规模、计量口径、证据与验收判据），同一根因仅归属一个主专项展开，其余专项仅补充影响面或门禁建议，避免重复计分或对无共同入口的组合生造人工基线。
 </output_contract>
