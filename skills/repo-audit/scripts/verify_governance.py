@@ -8,10 +8,12 @@ Checks:
    - UTF-8 BOM portability warning (strict extractors like Codex require '---' on line 1).
    - Documented YAML stdlib-subset frontmatter parsing (mappings, nested mappings, block/flow
      sequences, inline '#' comments outside quotes, single/double quoted strings, folded/literal
-     block scalars with chomping & indent indicators, multiline plain scalars, booleans/nulls).
+     block scalars with chomping & indent indicators, multiline plain scalars, booleans/nulls,
+     anchors/aliases, and duplicate-key rejection).
    - Required 'name' (<= 64 chars, ^[a-z0-9]+(-[a-z0-9]+)*$, matches parent directory),
-     required 'description' (non-empty, <= 1024 chars), optional 'compatibility' (<= 500 chars),
-     standard agentskills.io keys check, and generic < 500 lines body budget warning.
+     required 'description' (non-empty, <= 1024 chars), optional 'compatibility' (1-500 chars),
+     optional 'metadata' (mapping), standard agentskills.io keys check, and generic < 500 lines
+     body budget warning.
 2. Codex sidecar agents/openai.yaml (if present):
    - Nested interface/policy YAML validation, interface.short_description length (25-64 chars),
      interface.default_prompt '$<skill-name>' check, and strict unquoted YAML boolean check
@@ -19,13 +21,14 @@ Checks:
 3. Markdown governance & skill docs (discovered via pruned relative walk plus each SKILL.md's
    skill directory, even in standalone single-skill repos without a 'skills/' parent):
    - Broken relative links after stripping 3+ backtick/tilde fenced code blocks and inline code
-     spans; supports inline links with balanced parens and optional titles, angle-bracket
+     spans; supports inline links with balanced parens and optional titles, CommonMark angle-bracket
      destinations (<path with spaces.md>), URL-encoded paths (%20), and reference-style link
      definitions ([id]: dest).
    - 1-hop reference topology warning when a Markdown file under <skill-dir>/references/
      links relatively to another file under <skill-dir>/references/.
-   - Scope note: renderer-specific '#anchors' and leading '/' repo/web routes are outside
-     generic relative-link checks and are intentionally skipped.
+   - Scope note: renderer-specific '#anchors' and leading '/' (or Windows drive/UNC) routes
+     (before or after URL decoding) are outside generic relative-link checks and are intentionally
+     skipped.
 4. DESIGN.json (if present):
    - Strict RFC 8259 JSON syntax (rejecting non-standard NaN, Infinity, -Infinity),
      root object check, and dict type validation for standard token layers
@@ -35,6 +38,7 @@ Checks:
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import os
 import pathlib
@@ -90,7 +94,9 @@ BLOCK_SCALAR_HEADER_RE = re.compile(
 FENCE_OPEN_RE = re.compile(r"^(?:[ \t]*>[ \t]?)*[ \t]*(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
 FENCE_CLOSE_RE = re.compile(r"^(?:[ \t]*>[ \t]?)*[ \t]*(?P<fence>`{3,}|~{3,})[ \t]*$")
 REF_DEF_LINE_RE = re.compile(r"^[ ]{0,3}\[(?P<label>[^\[\]\n]+)\]:[ \t]*(?P<rest>.*)$")
-PLACEHOLDER_TOKEN_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
+WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
+YAML_ANCHOR_NAME_RE = re.compile(r"^[^\s,\[\]{}]+$")
+YAML_ANCHOR_PREFIX_RE = re.compile(r"^&([^\s,\[\]{}]+)(?:[ \t]+(.*)|[ \t]*)$")
 ASCII_PUNCTUATION = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
 
 YAML_TRUE_TOKENS = {"true", "True", "TRUE"}
@@ -183,33 +189,15 @@ def _next_meaningful_line(lines: list[str], start: int) -> int:
     return idx
 
 
-def _strip_inline_comment(text: str) -> tuple[str, bool]:
-    in_single = False
-    in_double = False
-    i = 0
-    n = len(text)
-    while i < n:
-        ch = text[i]
-        if in_double:
-            if ch == "\\" and i + 1 < n:
-                i += 2
-                continue
-            if ch == '"':
-                in_double = False
-        elif in_single:
-            if ch == "'":
-                if i + 1 < n and text[i + 1] == "'":
-                    i += 2
-                    continue
-                in_single = False
-        else:
-            if ch == '"':
-                in_double = True
-            elif ch == "'":
-                in_single = True
-            elif ch == "#" and (i == 0 or text[i - 1] in (" ", "\t")):
-                return text[:i].rstrip(" \t"), True
-        i += 1
+def _strip_plain_inline_comment(text: str) -> tuple[str, bool]:
+    """Strip trailing '#' comment from an unquoted YAML plain scalar line.
+
+    In YAML 1.2, quotes (' or \") inside a plain scalar are literal characters and
+    never start a quoted string; any '#' at index 0 or preceded by space/tab begins a comment.
+    """
+    for i, ch in enumerate(text):
+        if ch == "#" and (i == 0 or text[i - 1] in (" ", "\t")):
+            return text[:i].rstrip(" \t"), True
     return text.rstrip(" \t"), False
 
 
@@ -491,6 +479,7 @@ def _split_flow_items(inner: str, line_no: int) -> list[str]:
     depth = 0
     in_single = False
     in_double = False
+    at_token_start = True
     i = 0
     n = len(inner)
     while i < n:
@@ -512,24 +501,56 @@ def _split_flow_items(inner: str, line_no: int) -> list[str]:
                     continue
                 in_single = False
         else:
-            if ch == '"':
-                in_double = True
+            if ch == "#" and (i == 0 or inner[i - 1] in (" ", "\t", "\n")):
+                while i < n and inner[i] != "\n":
+                    i += 1
+                continue
+            if ch == "\n":
+                if buf and buf[-1] not in (" ", "\t"):
+                    buf.append(" ")
+                i += 1
+                while i < n and inner[i] in (" ", "\t"):
+                    i += 1
+                continue
+            if ch == "&" and at_token_start:
                 buf.append(ch)
-            elif ch == "'":
+                i += 1
+                while i < n and inner[i] not in (" ", "\t", "\r", "\n", ",", "[", "]", "{", "}"):
+                    buf.append(inner[i])
+                    i += 1
+                continue
+            if ch == '"' and at_token_start:
+                in_double = True
+                at_token_start = False
+                buf.append(ch)
+            elif ch == "'" and at_token_start:
                 in_single = True
+                at_token_start = False
                 buf.append(ch)
             elif ch in ("[", "{"):
                 depth += 1
+                at_token_start = True
                 buf.append(ch)
             elif ch in ("]", "}"):
                 depth -= 1
                 if depth < 0:
                     raise YamlParseError(f"Line {line_no}: Unmatched closing '{ch}' in flow collection")
+                at_token_start = False
                 buf.append(ch)
             elif ch == "," and depth == 0:
                 items.append("".join(buf).strip())
                 buf = []
+                at_token_start = True
+            elif ch == ",":
+                at_token_start = True
+                buf.append(ch)
+            elif ch == ":" and (i + 1 == n or inner[i + 1] in (" ", "\t", "\n")):
+                at_token_start = True
+                buf.append(ch)
+            elif ch in (" ", "\t", "\r"):
+                buf.append(ch)
             else:
+                at_token_start = False
                 buf.append(ch)
         i += 1
     if in_single or in_double or depth != 0:
@@ -540,10 +561,30 @@ def _split_flow_items(inner: str, line_no: int) -> list[str]:
     return items
 
 
-def _parse_flow_value(token: str, line_no: int) -> Any:
+def _parse_flow_value(token: str, line_no: int, anchors: dict[str, Any]) -> Any:
     token = token.strip()
     if not token:
         return None
+    if token.startswith("*"):
+        alias_name = token[1:]
+        if not alias_name or not YAML_ANCHOR_NAME_RE.match(alias_name):
+            raise YamlParseError(f"Line {line_no}: Invalid YAML alias {token!r} in flow collection")
+        if alias_name not in anchors:
+            raise YamlParseError(f"Line {line_no}: Undefined YAML alias '*{alias_name}'")
+        return copy.deepcopy(anchors[alias_name])
+    if token.startswith("&"):
+        anchor_match = YAML_ANCHOR_PREFIX_RE.match(token)
+        if not anchor_match:
+            raise YamlParseError(f"Line {line_no}: Invalid YAML anchor syntax {token!r} in flow collection")
+        anchor_name = anchor_match.group(1)
+        after_anchor = (anchor_match.group(2) or "").strip()
+        if after_anchor.startswith(("*", "&")):
+            raise YamlParseError(
+                f"Line {line_no}: Anchor '&{anchor_name}' cannot directly precede another anchor or alias"
+            )
+        val = _parse_flow_value(after_anchor, line_no, anchors) if after_anchor else None
+        anchors[anchor_name] = copy.deepcopy(val)
+        return val
     if token.startswith('"'):
         decoded, close_idx, _ = _decode_double_quoted_segment(token[1:], line_no)
         if close_idx is None:
@@ -564,7 +605,7 @@ def _parse_flow_value(token: str, line_no: int) -> Any:
         inner = token[1:-1].strip()
         if not inner:
             return []
-        return [_parse_flow_value(item, line_no) for item in _split_flow_items(inner, line_no)]
+        return [_parse_flow_value(item, line_no, anchors) for item in _split_flow_items(inner, line_no)]
     if token.startswith("{"):
         if not token.endswith("}"):
             raise YamlParseError(f"Line {line_no}: Unclosed flow mapping '{{'")
@@ -577,7 +618,9 @@ def _parse_flow_value(token: str, line_no: int) -> Any:
             if pair is None:
                 raise YamlParseError(f"Line {line_no}: Invalid entry {entry!r} in flow mapping")
             k, v = pair
-            result[k] = _parse_flow_value(v, line_no)
+            if k in result:
+                raise YamlParseError(f"Line {line_no}: Duplicate mapping key {k!r} in flow mapping")
+            result[k] = _parse_flow_value(v, line_no, anchors)
         return result
     if _has_unquoted_mapping_colon(token):
         raise YamlParseError(f"Line {line_no}: Unexpected ':' in flow scalar {token!r}")
@@ -588,6 +631,7 @@ def _find_flow_close(text: str, open_ch: str, close_ch: str) -> int | None:
     depth = 0
     in_single = False
     in_double = False
+    at_token_start = True
     i = 0
     n = len(text)
     while i < n:
@@ -605,18 +649,39 @@ def _find_flow_close(text: str, open_ch: str, close_ch: str) -> int | None:
                     continue
                 in_single = False
         else:
-            if ch == '"':
+            if ch == "#" and (i == 0 or text[i - 1] in (" ", "\t", "\n")):
+                while i < n and text[i] != "\n":
+                    i += 1
+                continue
+            if ch == "&" and at_token_start:
+                i += 1
+                while i < n and text[i] not in (" ", "\t", "\r", "\n", ",", "[", "]", "{", "}"):
+                    i += 1
+                continue
+            if ch == '"' and at_token_start:
                 in_double = True
-            elif ch == "'":
+                at_token_start = False
+            elif ch == "'" and at_token_start:
                 in_single = True
-            elif ch == "#" and (i == 0 or text[i - 1] in (" ", "\t")):
-                break
-            elif ch == open_ch:
-                depth += 1
-            elif ch == close_ch:
-                depth -= 1
-                if depth == 0:
-                    return i
+                at_token_start = False
+            elif ch in ("[", "{"):
+                if ch == open_ch:
+                    depth += 1
+                at_token_start = True
+            elif ch in ("]", "}"):
+                if ch == close_ch:
+                    depth -= 1
+                    if depth == 0:
+                        return i
+                at_token_start = False
+            elif ch == ",":
+                at_token_start = True
+            elif ch == ":" and (i + 1 == n or text[i + 1] in (" ", "\t", "\n")):
+                at_token_start = True
+            elif ch in (" ", "\t", "\r", "\n"):
+                pass
+            else:
+                at_token_start = False
         i += 1
     return None
 
@@ -627,6 +692,7 @@ def _parse_flow_collection(
     start_text: str,
     parent_indent: int,
     base_line_no: int,
+    anchors: dict[str, Any],
 ) -> tuple[Any, int]:
     start_line_no = base_line_no + idx
     open_ch = start_text[0]
@@ -639,17 +705,19 @@ def _parse_flow_collection(
             _validate_trailing_after_token(
                 buf[close_idx + 1 :], base_line_no + j, f"flow collection '{open_ch}...{close_ch}'"
             )
-            return _parse_flow_value(buf[: close_idx + 1], start_line_no), j + 1
+            return _parse_flow_value(buf[: close_idx + 1], start_line_no, anchors), j + 1
         j += 1
         while j < len(lines) and _is_blank_or_comment(lines[j]):
             j += 1
         if j >= len(lines):
             raise YamlParseError(f"Line {start_line_no}: Unclosed flow collection '{open_ch}'")
         cont_indent = _line_indent(lines[j], base_line_no + j)
-        if cont_indent <= parent_indent:
+        cont_text = lines[j][cont_indent:]
+        if cont_indent < parent_indent or (
+            cont_indent == parent_indent and not cont_text.startswith(close_ch)
+        ):
             raise YamlParseError(f"Line {start_line_no}: Unclosed flow collection '{open_ch}'")
-        cont_text, _ = _strip_inline_comment(lines[j][cont_indent:])
-        buf = f"{buf} {cont_text}"
+        buf = f"{buf}\n{cont_text}"
 
 
 def _split_mapping_line(content: str, line_no: int) -> tuple[str, str] | None:
@@ -681,6 +749,8 @@ def _split_mapping_line(content: str, line_no: int) -> tuple[str, str] | None:
             raw_key = content[:i].strip(" \t")
             if not raw_key:
                 raise YamlParseError(f"Line {line_no}: Empty mapping key before ':'")
+            if raw_key.startswith("*"):
+                raise YamlParseError(f"Line {line_no}: Undefined or unsupported YAML alias key {raw_key!r}")
             return raw_key, content[i + 1 :].lstrip(" \t")
     return None
 
@@ -691,6 +761,7 @@ def _parse_value(
     rest: str,
     parent_indent: int,
     base_line_no: int,
+    anchors: dict[str, Any],
 ) -> tuple[Any, int]:
     rest = rest.lstrip(" \t")
     if not rest or rest.startswith("#"):
@@ -702,13 +773,13 @@ def _parse_value(
         next_content = lines[j][next_indent:]
         is_seq = next_content == "-" or next_content.startswith(("- ", "-\t"))
         if next_indent == parent_indent and is_seq:
-            return _parse_block_sequence(lines, j, next_indent, base_line_no)
+            return _parse_block_sequence(lines, j, next_indent, base_line_no, anchors)
         if next_indent > parent_indent:
             if is_seq:
-                return _parse_block_sequence(lines, j, next_indent, base_line_no)
+                return _parse_block_sequence(lines, j, next_indent, base_line_no, anchors)
             if _split_mapping_line(next_content, next_line_no) is not None:
-                return _parse_block_mapping(lines, j, next_indent, base_line_no)
-            return _parse_value(lines, j, next_content, parent_indent, base_line_no)
+                return _parse_block_mapping(lines, j, next_indent, base_line_no, anchors)
+            return _parse_value(lines, j, next_content, parent_indent, base_line_no, anchors)
         return None, idx + 1
 
     if rest.startswith('"'):
@@ -718,9 +789,30 @@ def _parse_value(
     if rest[0] in ("|", ">"):
         return _parse_block_scalar(lines, idx, rest, parent_indent, base_line_no)
     if rest[0] in ("[", "{"):
-        return _parse_flow_collection(lines, idx, rest, parent_indent, base_line_no)
+        return _parse_flow_collection(lines, idx, rest, parent_indent, base_line_no, anchors)
+    if rest.startswith("*"):
+        alias_part, _ = _strip_plain_inline_comment(rest)
+        alias_name = alias_part[1:]
+        if not alias_name or not YAML_ANCHOR_NAME_RE.match(alias_name):
+            raise YamlParseError(f"Line {base_line_no + idx}: Invalid YAML alias {alias_part!r}")
+        if alias_name not in anchors:
+            raise YamlParseError(f"Line {base_line_no + idx}: Undefined YAML alias '*{alias_name}'")
+        return copy.deepcopy(anchors[alias_name]), idx + 1
+    if rest.startswith("&"):
+        anchor_match = YAML_ANCHOR_PREFIX_RE.match(rest)
+        if not anchor_match:
+            raise YamlParseError(f"Line {base_line_no + idx}: Invalid YAML anchor syntax {rest!r}")
+        anchor_name = anchor_match.group(1)
+        after_anchor = (anchor_match.group(2) or "").lstrip(" \t")
+        if after_anchor.startswith(("*", "&")):
+            raise YamlParseError(
+                f"Line {base_line_no + idx}: Anchor '&{anchor_name}' cannot directly precede another anchor or alias"
+            )
+        val, next_idx = _parse_value(lines, idx, after_anchor, parent_indent, base_line_no, anchors)
+        anchors[anchor_name] = copy.deepcopy(val)
+        return val, next_idx
 
-    first_part, had_comment = _strip_inline_comment(rest)
+    first_part, had_comment = _strip_plain_inline_comment(rest)
     if _has_unquoted_mapping_colon(first_part):
         raise YamlParseError(
             f"Line {base_line_no + idx}: Unexpected ':' in unquoted plain scalar {first_part!r}"
@@ -747,7 +839,7 @@ def _parse_value(
         if cont_indent <= parent_indent:
             break
         cont_text = lines[probe][cont_indent:]
-        cont_part, cont_had_comment = _strip_inline_comment(cont_text)
+        cont_part, cont_had_comment = _strip_plain_inline_comment(cont_text)
         if _has_unquoted_mapping_colon(cont_part):
             raise YamlParseError(
                 f"Line {probe_line_no}: Unexpected mapping syntax or ':' in multiline plain scalar"
@@ -769,6 +861,7 @@ def _parse_block_sequence(
     start: int,
     expected_indent: int,
     base_line_no: int,
+    anchors: dict[str, Any],
 ) -> tuple[list[Any], int]:
     items: list[Any] = []
     idx = start
@@ -790,7 +883,7 @@ def _parse_block_sequence(
 
         after_dash = content[1:]
         if not after_dash or after_dash.strip(" \t") == "" or after_dash.lstrip(" \t").startswith("#"):
-            val, idx = _parse_value(lines, idx, "", expected_indent, base_line_no)
+            val, idx = _parse_value(lines, idx, "", expected_indent, base_line_no, anchors)
             items.append(val)
             continue
 
@@ -803,7 +896,7 @@ def _parse_block_sequence(
         if rest == "-" or rest.startswith(("- ", "-\t")):
             synthetic_lines = list(lines)
             synthetic_lines[idx] = (" " * rest_indent) + rest
-            val, idx = _parse_block_sequence(synthetic_lines, idx, rest_indent, base_line_no)
+            val, idx = _parse_block_sequence(synthetic_lines, idx, rest_indent, base_line_no, anchors)
             items.append(val)
             continue
 
@@ -811,18 +904,20 @@ def _parse_block_sequence(
         if pair is not None:
             k, v_rest = pair
             item_map: dict[str, Any] = {}
-            val, idx = _parse_value(lines, idx, v_rest, rest_indent, base_line_no)
+            val, idx = _parse_value(lines, idx, v_rest, rest_indent, base_line_no, anchors)
             item_map[k] = val
             next_idx = _next_meaningful_line(lines, idx)
             if next_idx < len(lines):
                 next_indent = _line_indent(lines[next_idx], base_line_no + next_idx)
                 if next_indent == rest_indent:
-                    more_map, idx = _parse_block_mapping(lines, next_idx, rest_indent, base_line_no)
+                    more_map, idx = _parse_block_mapping(
+                        lines, next_idx, rest_indent, base_line_no, anchors, existing_keys={k}
+                    )
                     item_map.update(more_map)
             items.append(item_map)
             continue
 
-        val, idx = _parse_value(lines, idx, rest, expected_indent, base_line_no)
+        val, idx = _parse_value(lines, idx, rest, expected_indent, base_line_no, anchors)
         items.append(val)
     return items, idx
 
@@ -832,8 +927,11 @@ def _parse_block_mapping(
     start: int,
     expected_indent: int,
     base_line_no: int,
+    anchors: dict[str, Any],
+    existing_keys: set[str] | None = None,
 ) -> tuple[dict[str, Any], int]:
     data: dict[str, Any] = {}
+    seen = set(existing_keys) if existing_keys else set()
     idx = start
     while idx < len(lines):
         idx = _next_meaningful_line(lines, idx)
@@ -852,7 +950,10 @@ def _parse_block_mapping(
         if pair is None:
             raise YamlParseError(f"Line {line_no}: Expected 'key: value' mapping entry, got {content!r}")
         key, rest = pair
-        val, idx = _parse_value(lines, idx, rest, expected_indent, base_line_no)
+        if key in seen:
+            raise YamlParseError(f"Line {line_no}: Duplicate mapping key {key!r}")
+        seen.add(key)
+        val, idx = _parse_value(lines, idx, rest, expected_indent, base_line_no, anchors)
         data[key] = val
     return data, idx
 
@@ -883,7 +984,8 @@ def parse_yaml_mapping(
         raise YamlParseError(
             f"Line {base_line_no + start}: Root YAML mapping must start at column 0 (got indent {root_indent})"
         )
-    data, next_idx = _parse_block_mapping(sliced, start, 0, base_line_no)
+    anchors: dict[str, Any] = {}
+    data, next_idx = _parse_block_mapping(sliced, start, 0, base_line_no, anchors)
     next_idx = _next_meaningful_line(sliced, next_idx)
     if next_idx < len(sliced):
         raise YamlParseError(
@@ -1075,19 +1177,37 @@ def check_skill_file(
             elif len(desc) > 1024:
                 errors.append(f"{rel}: 'description' length is {len(desc)} chars (exceeds 1024 limit)")
 
-        if "compatibility" in fm and fm["compatibility"] is not None:
+        if "compatibility" in fm:
             raw_compat = fm["compatibility"]
-            if not isinstance(raw_compat, str):
+            if raw_compat is None:
+                errors.append(
+                    f"{rel}: Frontmatter field 'compatibility' is empty "
+                    "(if provided, must be 1-500 non-empty chars)"
+                )
+            elif not isinstance(raw_compat, str):
                 errors.append(
                     f"{rel}: Frontmatter field 'compatibility' must be a string, "
                     f"got {_yaml_type_name(raw_compat)}"
                 )
             else:
                 compat = raw_compat.strip()
-                if len(compat) > 500:
+                if not compat:
+                    errors.append(
+                        f"{rel}: Frontmatter field 'compatibility' is empty "
+                        "(if provided, must be 1-500 non-empty chars)"
+                    )
+                elif len(compat) > 500:
                     errors.append(
                         f"{rel}: 'compatibility' length is {len(compat)} chars (exceeds 500 limit)"
                     )
+
+        if "metadata" in fm:
+            raw_meta = fm["metadata"]
+            if not isinstance(raw_meta, dict):
+                errors.append(
+                    f"{rel}: Frontmatter field 'metadata' must be a key-value mapping, "
+                    f"got {_yaml_type_name(raw_meta)}"
+                )
 
         unknown_keys = sorted(set(fm.keys()) - STANDARD_SKILL_KEYS)
         if unknown_keys:
@@ -1252,10 +1372,10 @@ def _consume_optional_title(text: str, pos: int, stop_at_eol: bool) -> int | Non
     return None
 
 
-def _parse_inline_link_dest(text: str, open_paren_pos: int) -> tuple[str, bool, int] | None:
+def _parse_inline_link_dest(text: str, open_paren_pos: int) -> tuple[str, int] | None:
     """Parse '(dest "optional title")' starting at open_paren_pos.
 
-    Returns (destination, is_angle_bracket, end_pos_after_close_paren) or None.
+    Returns (destination, end_pos_after_close_paren) or None.
     """
     n = len(text)
     i = open_paren_pos + 1
@@ -1264,7 +1384,7 @@ def _parse_inline_link_dest(text: str, open_paren_pos: int) -> tuple[str, bool, 
     if i >= n:
         return None
     if text[i] == ")":
-        return "", False, i + 1
+        return "", i + 1
 
     # Attempt CommonMark angle-bracket destination <...>
     if text[i] == "<":
@@ -1291,14 +1411,14 @@ def _parse_inline_link_dest(text: str, open_paren_pos: int) -> tuple[str, bool, 
             while k < n and text[k] in (" ", "\t", "\r", "\n"):
                 k += 1
             if k < n and text[k] == ")":
-                return "".join(buf), True, k + 1
+                return "".join(buf), k + 1
             if k > j and k < n and text[k] in ('"', "'", "("):
                 after_title = _consume_optional_title(text, k, stop_at_eol=False)
                 if after_title is not None:
                     while after_title < n and text[after_title] in (" ", "\t", "\r", "\n"):
                         after_title += 1
                     if after_title < n and text[after_title] == ")":
-                        return "".join(buf), True, after_title + 1
+                        return "".join(buf), after_title + 1
 
     # Normal destination with balanced parentheses and optional title
     dest_buf: list[str] = []
@@ -1319,7 +1439,7 @@ def _parse_inline_link_dest(text: str, open_paren_pos: int) -> tuple[str, bool, 
             continue
         if ch == ")":
             if paren_depth == 0:
-                return "".join(dest_buf), False, j + 1
+                return "".join(dest_buf), j + 1
             paren_depth -= 1
             dest_buf.append(ch)
             j += 1
@@ -1334,18 +1454,18 @@ def _parse_inline_link_dest(text: str, open_paren_pos: int) -> tuple[str, bool, 
     while k < n and text[k] in (" ", "\t", "\r", "\n"):
         k += 1
     if k < n and text[k] == ")":
-        return "".join(dest_buf), False, k + 1
+        return "".join(dest_buf), k + 1
     if k > j and k < n and text[k] in ('"', "'", "("):
         after_title = _consume_optional_title(text, k, stop_at_eol=False)
         if after_title is not None:
             while after_title < n and text[after_title] in (" ", "\t", "\r", "\n"):
                 after_title += 1
             if after_title < n and text[after_title] == ")":
-                return "".join(dest_buf), False, after_title + 1
+                return "".join(dest_buf), after_title + 1
     return None
 
 
-def _parse_ref_def_dest(rest: str) -> tuple[str, bool] | None:
+def _parse_ref_def_dest(rest: str) -> str | None:
     """Parse 'dest ["optional title"]' from a reference-style link definition line."""
     s = rest.strip(" \t")
     if not s:
@@ -1373,11 +1493,11 @@ def _parse_ref_def_dest(rest: str) -> tuple[str, bool] | None:
         if angle_ok:
             rem = s[j:].strip(" \t")
             if not rem:
-                return "".join(buf), True
+                return "".join(buf)
             if j < n and s[j] in (" ", "\t"):
                 after_title = _consume_optional_title(rem, 0, stop_at_eol=True)
                 if after_title is not None and rem[after_title:].strip(" \t") == "":
-                    return "".join(buf), True
+                    return "".join(buf)
 
     # Normal destination (whitespace-delimited) + optional title to EOL
     dest_buf: list[str] = []
@@ -1394,17 +1514,17 @@ def _parse_ref_def_dest(rest: str) -> tuple[str, bool] | None:
         return None
     rem = s[j:].strip(" \t")
     if not rem:
-        return "".join(dest_buf), False
+        return "".join(dest_buf)
     after_title = _consume_optional_title(rem, 0, stop_at_eol=True)
     if after_title is not None and rem[after_title:].strip(" \t") == "":
-        return "".join(dest_buf), False
+        return "".join(dest_buf)
     return None
 
 
-def _extract_markdown_links(text: str) -> list[tuple[str, bool]]:
-    """Extract (raw_destination, is_angle_bracket) from Markdown text after stripping code."""
+def _extract_markdown_links(text: str) -> list[str]:
+    """Extract raw link destinations from Markdown text after stripping code."""
     cleaned = _strip_inline_code_spans(_strip_fenced_code_blocks(text))
-    targets: list[tuple[str, bool]] = []
+    targets: list[str] = []
 
     # 1. Inline links: [label](dest "optional title")
     i = 0
@@ -1414,8 +1534,8 @@ def _extract_markdown_links(text: str) -> list[tuple[str, bool]]:
             if _has_matching_open_bracket(cleaned, i):
                 parsed = _parse_inline_link_dest(cleaned, i + 1)
                 if parsed is not None:
-                    dest, is_angle, end_pos = parsed
-                    targets.append((dest, is_angle))
+                    dest, end_pos = parsed
+                    targets.append(dest)
                     i = end_pos
                     continue
         i += 1
@@ -1444,6 +1564,11 @@ def _extract_markdown_links(text: str) -> list[tuple[str, bool]]:
         idx += 1
 
     return targets
+
+
+def _is_root_or_drive_path(target: str) -> bool:
+    """Return True for POSIX root ('/'), UNC/Windows root ('\\'), or Windows drive ('C:') paths."""
+    return target.startswith(("/", "\\")) or bool(WINDOWS_DRIVE_RE.match(target))
 
 
 def _strip_leading_frontmatter(text: str, is_skill_md: bool) -> str:
@@ -1487,7 +1612,7 @@ def check_markdown_links(
     md_resolved = md_path.resolve()
     refs_resolved = refs_dir.resolve() if refs_dir is not None else None
 
-    for raw_target, is_angle in _extract_markdown_links(scan_text):
+    for raw_target in _extract_markdown_links(scan_text):
         stripped_target = raw_target.strip()
         if not stripped_target:
             continue
@@ -1499,20 +1624,24 @@ def check_markdown_links(
         if not target_part:
             continue
 
-        # Leading '/' repo/web routes are outside generic relative-link checks.
-        if target_part.startswith("/"):
-            continue
-
         # Skip template/variable placeholders ($VAR, ${VAR}, embedded <...>).
         if target_part.startswith("$") or "${" in target_part:
             continue
         if "<" in target_part or ">" in target_part:
             continue
-        if is_angle and PLACEHOLDER_TOKEN_RE.fullmatch(target_part):
-            if not (md_path.parent / target_part).exists():
-                continue
 
         decoded_target = urllib.parse.unquote(target_part)
+
+        # Reject NUL bytes (raw or URL-decoded %00) before any filesystem probe.
+        if "\x00" in target_part or "\x00" in decoded_target:
+            errors.append(f"{rel}: Broken relative link '{stripped_target}' (contains NUL byte)")
+            continue
+
+        # Leading '/' (or Windows drive/UNC prefix) routes are outside generic relative-link checks.
+        # Check BOTH before and after URL-unquoting so '%2Fetc/passwd' never resolves to host root.
+        if _is_root_or_drive_path(target_part) or _is_root_or_drive_path(decoded_target):
+            continue
+
         try:
             resolved = (md_path.parent / decoded_target).resolve()
             exists = resolved.exists()
@@ -1521,7 +1650,7 @@ def check_markdown_links(
                 if fallback.exists():
                     resolved = fallback
                     exists = True
-        except OSError:
+        except (OSError, ValueError):
             errors.append(f"{rel}: Broken relative link '{stripped_target}' (invalid path)")
             continue
 
