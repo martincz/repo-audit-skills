@@ -3,6 +3,7 @@
 ## 1. 元仓库角色声明（防止指令串扰）
 
 本仓库的交付产物是符合 `agentskills.io` 开放规范的 Agent Skill 包（位于 `skills/repo-audit/`）。
+- **技能包与元仓库隔离**：`skills/repo-audit/` 是可独立分发安装到**下游目标仓库**的交付包，其 `SKILL.md` 与 `references/*.md` 不得引用或依赖本元仓库根目录的 `AGENTS.md` / `README.md`；修改技能包时与元仓库自身文档分项隔离，避免将本仓维护规范与下游审计规程混为一谈。
 - `skills/repo-audit/` 内的文档是面向**下游目标仓库**执行的审计与治理指令；当你在本仓库内开发维护时，你的职责是**编写与演进这些 Skill 规程及校验脚本**，不受子文档中“目标仓只读零修改”条款对本仓自身的限制（除非用户明确要求对本仓运行自测审计）。
 - 按需读取：修改具体专项时仅读取 [SKILL.md](skills/repo-audit/SKILL.md) 与对应 `skills/repo-audit/references/*.md`，无需预先通读全部参考文件。
 
@@ -21,7 +22,9 @@
    - [verify_governance.py](skills/repo-audit/scripts/verify_governance.py) 必须保持**纯 Python 3 标准库、零第三方依赖、无交互阻塞**；
    - 严守 [LICENSE](LICENSE)（MIT）纯净性：外部非 MIT 生态技能（如 `frontend-design`）采取运行时探测协同 + 极简客观规则兜底，绝不直接拷贝第三方受限文本。
 4. **提示词工程风格基线**：
-   - 面向高自主性推理模型（Codex / Claude / Gemini）编写：常规规则使用清晰直接的肯定句，仅在真实安全/只读红线处使用强约束并附简短原因，不添加要求输出思维链的过时脚手架，不将单一行业特定术语写死为通用默认前提（详见 [agent-skills-framework.md](skills/repo-audit/references/agent-skills-framework.md)）。
+   - 面向高自主性推理模型（Codex / Claude / Gemini）编写：常规规则使用清晰直接的肯定句与一致的结构分隔（Markdown 层级或语义 XML 标签），仅在真实安全/只读/防数据丢失红线处使用强约束并附简短原因；
+   - 推理深度交给运行时参数与原生隐藏思考块，不要求在正文输出原始逐步推理过程；移除冗余的泛化简短催促与易诱发保守漏报的刚性截断/机械复查话术；
+   - 保持静态规则在前、动态输入在后的 Prompt Cache 友好布局，明确闭环验收标准、自主决策边界与不可信数据隔离，不将单一行业特定术语写死为通用默认前提（详见 [agent-skills-framework.md](skills/repo-audit/references/agent-skills-framework.md)）。
 
 ## 3. 跨文件同步契约
 
