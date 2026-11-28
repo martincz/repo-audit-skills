@@ -17,6 +17,7 @@
 | `ui` | **前端审计** | [frontend-ui-audit.md](skills/repo-audit/references/frontend-ui-audit.md) | `Mode R` 只读 | 对照 `PRODUCT.md` / `DESIGN.json` / `DESIGN.md` 与客观版式准则，排查视觉权重倒挂、卡片套卡片、Token 硬编码绕过、换肤成本、响应式与 CLS |
 | `db` | **数据库治理** | [database-audit.md](skills/repo-audit/references/database-audit.md) | `Mode R` 只读 | 高频 SQL/联合索引/长事务/写入幂等审计 + 全量持久化资产孤儿反查、多环境门控与 `Retention ≥ Lookback` 对账 |
 | `perf` | **应用层性能** | [app-performance.md](skills/repo-audit/references/app-performance.md) | `Mode R` 只读 | 外部 I/O 批量化、事件循环同步阻塞、单链重复拉取、热路径算法/流式处理，以及重试风暴、LLM 缓存命中与推理成本优化 |
+| `pipeline` | **批处理与产物管线** | [pipeline-efficiency.md](skills/repo-audit/references/pipeline-efficiency.md) | `Mode R` 只读 | 针对数据构建、批量导出、离线计算与评估作业：排查小文件碎片、清单膨胀、重复校验与拷贝、逐文件刷盘、计算与落盘耦合、快路径退化及运行脚本闭包，输出可复验重构蓝图 |
 | `test` | **测试与门禁** | [test-and-gates.md](skills/repo-audit/references/test-and-gates.md) | `Mode R` 只读 | 实测耗时采样、清理 4 类 AI 膨胀测试与真 `sleep`、识别高危路径测试缺口、设计秒级增量 `pre-commit` 分层蓝图 |
 | `design-docs` | **设计规范立标** | [frontend-design-docs.md](skills/repo-audit/references/frontend-design-docs.md) | `Mode W-Doc` 仅改规范文档 | 采优去杂建立或重构 `PRODUCT.md`、`DESIGN.json`、`DESIGN.md` 单一事实源，不改动业务源码与样式代码 |
 | `agents` | **业务仓 Agent 治理** | [agent-docs-business.md](skills/repo-audit/references/agent-docs-business.md) | `Mode W-Doc` 仅改规范文档 | 对照真实源码整理或重构业务项目的 `AGENTS.md`、`CLAUDE.md`、项目级 Skills 与开发文档，清除过期内容并明确校验步骤、修改边界与核心约束 |
@@ -74,31 +75,44 @@ npx skills add martincz/repo-audit-skills --skill repo-audit -g -y
 - **OpenAI Codex 调用示例（使用 `$repo-audit`）**：
   - `$repo-audit health` — 执行全局只读健康检查
   - `$repo-audit security perf` — 同时运行安全边界与应用层性能审计
+  - `$repo-audit pipeline` — 审计产物型批处理与离线作业的存储碎片、重复校验与运行效率
+  - `$repo-audit pipeline test` — 联合审计批处理产物链路与测试/门禁覆盖
   - `$repo-audit agents` — 整理并重构当前业务项目的 `AGENTS.md` 与项目级 Skills
 - **支持技能斜杠命令的客户端（短子命令直达或空格多选组合）**：
   - `/repo-audit health` — 执行全局只读健康检查
   - `/repo-audit db` — 执行数据库 SQL 性能安全与数据生命周期契约审计
   - `/repo-audit security perf` — 同时运行安全边界与应用层性能审计
+  - `/repo-audit pipeline` — 审计产物型批处理与离线作业的小文件碎片、重复校验、计算效率与运行脚本闭包
+  - `/repo-audit pipeline test` — 联合审计批处理产物链路与测试/门禁覆盖
   - `/repo-audit design-docs` — 重构 `PRODUCT.md`、`DESIGN.json` 与 `DESIGN.md`（不改业务代码）
   - `/repo-audit agents` — 整理并重构当前业务项目的 `AGENTS.md` 与项目级 Skills
   - `/repo-audit skill-repo` — 审计并整理 Skills / Subagents 仓库的规范文档与配置
 - **自然语言直接唤醒**：
   - `梳理当前项目的目录结构与模块粒度，先输出只读重组蓝图`
+  - `排查离线批处理作业为何产生大量小文件、重复哈希和耗时膨胀，输出只读重构蓝图`
   - `体检 tests/ 测试套件与 pre-commit 钩子耗时，输出精简与分层蓝图`
 
 ---
 
-## 内置只读校验脚本
+## 内置只读辅助脚本
 
-仓库内置零第三方依赖的 Python 3 只读校验脚本 [`verify_governance.py`](skills/repo-audit/scripts/verify_governance.py)，用于检查任意目标仓库中的 `SKILL.md` 元数据与文件长度规范、`agents/openai.yaml` 的 Codex 扩展配置、Markdown 本地相对路径死链及 `DESIGN.json` 语法结构：
+仓库内置两份零第三方依赖的 Python 3 只读脚本，均不修改目标仓库文件：
+
+1. **文档与技能包校验脚本 [`verify_governance.py`](skills/repo-audit/scripts/verify_governance.py)**：检查任意目标仓库中的 `SKILL.md` 元数据与文件长度规范、`agents/openai.yaml` 的 Codex 扩展配置、Markdown 本地相对路径死链及 `DESIGN.json` 语法结构。
+2. **产物与脚本元数据观测脚本 [`scan_artifacts.py`](skills/repo-audit/scripts/scan_artifacts.py)**：配合 `pipeline` 专项使用，纯元数据只读观测（不读取文件内容），在文件数、深度与协作式遍历时间上限（`--timeout`）内安全统计逻辑路径数与去重物理文件数、体积分桶与分位数、高频后缀、热点目录及工具/脚本目录规模（仅输出客观观察值，不写死阻断阈值，不跟随符号链接）。
 
 ```bash
-# 在本仓库检出目录下运行
+# 1. 文档与技能包校验（在本仓库检出目录下运行）
 python3 skills/repo-audit/scripts/verify_governance.py --root .
 python3 skills/repo-audit/scripts/verify_governance.py --root /path/to/target-repo --json
 
+# 2. 产物与脚本元数据只读观测（支持追加获准检查的外置数据/产物根目录）
+python3 -I -S -B skills/repo-audit/scripts/scan_artifacts.py --root /path/to/target-repo --json
+python3 -I -S -B skills/repo-audit/scripts/scan_artifacts.py --root /path/to/target-repo --artifact-dir /path/to/artifacts --json
+
 # 已安装技能包的用户（将 <skill-dir> 替换为实际安装目录，如 ~/.agents/skills/repo-audit）
 python3 <skill-dir>/scripts/verify_governance.py --root <target-repo> --json
+python3 -I -S -B <skill-dir>/scripts/scan_artifacts.py --root <target-repo> --json
 ```
 
 ---

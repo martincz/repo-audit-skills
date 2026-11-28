@@ -19,7 +19,7 @@
 3. **跨客户端元数据与 MIT 协议纯净性**：
    - `SKILL.md` 的 YAML frontmatter 仅使用 `agentskills.io` 标准字段（`name`、`description`、`license`、`compatibility`、`metadata`、`allowed-tools`），遵循开放规范并保障严格校验器（如 `skills-ref`）及跨客户端可移植性；
    - OpenAI Codex 专属展示与调用策略统一维护在 [openai.yaml](skills/repo-audit/agents/openai.yaml)（`interface.short_description` 保持 25～64 字符，`default_prompt` 显式包含 `$repo-audit`）；
-   - [verify_governance.py](skills/repo-audit/scripts/verify_governance.py) 保持**纯 Python 3 标准库、零第三方依赖、无交互阻塞**；
+   - `skills/repo-audit/scripts/` 下全部内置只读脚本（[verify_governance.py](skills/repo-audit/scripts/verify_governance.py) 与 [scan_artifacts.py](skills/repo-audit/scripts/scan_artifacts.py)）保持**纯 Python 3 标准库、零第三方依赖、无交互阻塞**；其中 `verify_governance.py` 专职文档与 Skill 包拓扑校验，不混入下游业务资源门禁，`scan_artifacts.py` 仅输出有界只读元数据观察值，不写死业务阻断阈值；
    - 严守 [LICENSE](LICENSE)（MIT）纯净性：`skills/repo-audit/LICENSE` 与根目录 [LICENSE](LICENSE) 保持逐字节同步，确保独立分发拷贝携带完整 MIT 许可声明；外部非 MIT 生态技能（如 `frontend-design`）仅采取运行时探测协同 + 极简客观规则兜底，绝不直接拷贝第三方受限文本。
 4. **提示词工程风格基线**：
    - 面向高自主性推理模型（Codex / Claude / Gemini）编写：常规规则使用清晰直接的肯定句与一致的结构分隔，仅在真实安全/只读/防数据丢失红线处使用强约束并附简短原因；专项规程统一使用语义 XML 标签 `<permission_gate>`、`<output_contract>`、`<completion_criteria>`（[SKILL.md](skills/repo-audit/SKILL.md) 另含 `<execution_protocol>`）；
@@ -43,7 +43,7 @@
   python3 -B skills/repo-audit/scripts/verify_governance.py --root . --json
   ```
 - **元仓库发布自检项**（独立于通用下游校验，发版或调整技能包结构时额外逐项核验）：
-  - [SKILL.md](skills/repo-audit/SKILL.md) 控制在 250 行以内（通用脚本默认按 `<500` 行告警），且 11 份 `skills/repo-audit/references/*.md` 全部由 `SKILL.md` 1 跳直达并与 [README.md](README.md) 覆盖矩阵及调用示例逐一对齐；
+  - [SKILL.md](skills/repo-audit/SKILL.md) 控制在 250 行以内（通用脚本默认按 `<500` 行告警），且 12 份 `skills/repo-audit/references/*.md` 全部由 `SKILL.md` 1 跳直达并与 [README.md](README.md) 覆盖矩阵及调用示例逐一对齐；
   - `skills/repo-audit/` 内零引用、零依赖本仓根目录 `AGENTS.md` / `README.md`；
   - [openai.yaml](skills/repo-audit/agents/openai.yaml) 显式声明有效 `interface.display_name`、`interface.short_description`（25～64 字符）、`interface.default_prompt`（含 `$repo-audit`）与布尔型 `policy.allow_implicit_invocation`；
   - `skills/repo-audit/LICENSE` 存在且与根目录 [LICENSE](LICENSE) 逐字节一致。
